@@ -1,0 +1,242 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // -------------------------------------------------------------
+    // Core Helper Functions
+    // -------------------------------------------------------------
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwnerOf(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+    
+    function isAccountActive() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountStatus == 'active';
+    }
+
+    // -------------------------------------------------------------
+    // 1. Users Collection
+    // -------------------------------------------------------------
+    match /users/{userId} {
+      allow read: if isOwnerOf(userId) || isAdmin();
+      
+      // Direct client creation only for normal initial customer registration
+      allow create: if isOwnerOf(userId) 
+                    && request.resource.data.role == 'customer'
+                    && request.resource.data.identityVerificationStatus == 'not_started'
+                    && request.resource.data.ageEligibilityStatus == 'not_checked'
+                    && request.resource.data.accountStatus == 'active';
+                    
+      // Critical fields (role, accountStatus, verification, DOB) CANNOT be updated by user
+      allow update: if (isOwnerOf(userId) && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role', 
+          'accountStatus', 
+          'identityVerificationStatus', 
+          'ageEligibilityStatus', 
+          'dateOfBirth'
+        ])
+      )) || isAdmin();
+      
+      allow delete: if isAdmin();
+
+      // FCM device tokens subcollection
+      match /fcm_tokens/{tokenId} {
+        allow read, write: if isOwnerOf(userId) || isAdmin();
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 2. Rooms Collection
+    // -------------------------------------------------------------
+    match /rooms/{roomId} {
+      // Anyone can read published listings (backend redacts exact address for unconfirmed stays)
+      allow read: if resource.data.listingStatus == 'published' || 
+                     (isAuthenticated() && resource.data.ownerId == request.auth.uid) || 
+                     isAdmin();
+      
+      // Only authenticated users with active account can create draft/pending rooms
+      allow create: if isAuthenticated() && isAccountActive()
+                    && request.resource.data.ownerId == request.auth.uid
+                    && request.resource.data.listingStatus in ['draft', 'pending_review']
+                    && request.resource.data.pricePerNightPaise > 0
+                    && request.resource.data.averageRating == 0
+                    && request.resource.data.reviewCount == 0;
+                    
+      // Room owners can update own draft/pending rooms. Cannot arbitrarily self-publish or modify ratings.
+      allow update: if (isAuthenticated() && resource.data.ownerId == request.auth.uid && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'listingStatus',
+          'averageRating',
+          'reviewCount',
+          'ownerId'
+        ])
+      )) || isAdmin();
+      
+      allow delete: if (isAuthenticated() && resource.data.ownerId == request.auth.uid && resource.data.listingStatus == 'draft') || isAdmin();
+    }
+
+    // -------------------------------------------------------------
+    // 3. Bookings Collection
+    // -------------------------------------------------------------
+    match /bookings/{bookingId} {
+      // Customer owns the booking, or owner owns the booked room, or admin
+      allow read: if isAuthenticated() && (
+        resource.data.customerId == request.auth.uid || 
+        resource.data.ownerId == request.auth.uid || 
+        isAdmin()
+      );
+      
+      // All booking writes, payment verifications, and state transitions MUST be server-mediated
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------
+    // 4. Room Blocks & Date Locks
+    // -------------------------------------------------------------
+    match /room_blocks/{blockId} {
+      allow read: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+      // Blocks must be created atomically through server transactions to verify against active reservations
+      allow write: if false;
+    }
+
+    match /booking_holds/{holdId} {
+      allow read: if isAuthenticated() && (resource.data.customerId == request.auth.uid || isAdmin());
+      allow write: if false; // Server-only transaction locking
+    }
+
+    match /room_date_locks/{lockId} {
+      allow read, write: if false; // Internal atomic lock table, accessible strictly via Admin SDK
+    }
+
+    // -------------------------------------------------------------
+    // 5. Payments & Refunds
+    // -------------------------------------------------------------
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && (resource.data.customerId == request.auth.uid || isAdmin());
+      allow write: if false; // Authoritative server gateway verification only
+    }
+
+    match /refunds/{refundId} {
+      allow read: if isAuthenticated() && (resource.data.requestedBy == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------
+    // 6. Verification Cases (Identity & Age)
+    // -------------------------------------------------------------
+    match /verification_cases/{verifId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      // Users cannot approve their own verification cases
+      allow write: if false; // Server or Admin review only
+    }
+
+    // -------------------------------------------------------------
+    // 7. Reviews
+    // -------------------------------------------------------------
+    match /reviews/{reviewId} {
+      allow read: if resource.data.moderationStatus == 'published' || isAdmin() || 
+                     (isAuthenticated() && (resource.data.customerId == request.auth.uid || resource.data.ownerId == request.auth.uid));
+      // Writes are strictly server-mediated to recalculate room rating aggregates atomically
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------
+    // 8. Notifications & WhatsApp
+    // -------------------------------------------------------------
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && resource.data.recipientUserId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.recipientUserId == request.auth.uid &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'deliveryStatus', 'updatedAt']);
+      allow create, delete: if false;
+    }
+
+    match /whatsapp_messages/{msgId} {
+      allow read, write: if false; // Internal dispatch queue
+    }
+
+    match /notification_jobs/{jobId} {
+      allow read, write: if false; // Scheduled worker queue
+    }
+
+    // -------------------------------------------------------------
+    // 9. Stay Extension Offers
+    // -------------------------------------------------------------
+    match /extension_offers/{offerId} {
+      allow read: if isAuthenticated() && (
+        resource.data.customerId == request.auth.uid || 
+        resource.data.ownerId == request.auth.uid || 
+        isAdmin()
+      );
+      allow write: if false; // Server transaction flow
+    }
+
+    // -------------------------------------------------------------
+    // 10. Owner Payouts
+    // -------------------------------------------------------------
+    match /owner_payouts/{payoutId} {
+      allow read: if isAuthenticated() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------
+    // 11. Support Tickets & Reports
+    // -------------------------------------------------------------
+    match /support_tickets/{ticketId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if false;
+
+      match /replies/{replyId} {
+        allow read: if isAuthenticated() && (
+          get(/databases/$(database)/documents/support_tickets/$(ticketId)).data.userId == request.auth.uid || 
+          isAdmin()
+        );
+        allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.reporterId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // -------------------------------------------------------------
+    // 12. System, Audit Logs & App Config
+    // -------------------------------------------------------------
+    match /outbox_events/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /payment_webhook_events/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /idempotency_records/{recordId} {
+      allow read, write: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false; // Immutable write-once via Admin SDK
+    }
+
+    match /app_config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "roomwala-production",
+    "staging": "roomwala-staging"
+  }
+}
+

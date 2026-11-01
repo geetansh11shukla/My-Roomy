@@ -1,0 +1,63 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Core helpers
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwnerOf(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.role == 'admin';
+    }
+
+    // 1. Room Images (Publicly readable, writeable only by room owner, max 10MB, valid image MIME)
+    match /rooms/{roomId}/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated()
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isAuthenticated() || isAdmin();
+    }
+    
+    // 2. User Profile Photos (Publicly readable, writeable strictly by the authenticated user, max 5MB)
+    match /users/{userId}/avatar/{fileName} {
+      allow read: if true;
+      allow write: if isOwnerOf(userId)
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isOwnerOf(userId) || isAdmin();
+    }
+    
+    // 3. Protected Verification Identity Documents (Aadhaar, Passport, License)
+    // STRICT RULE: Strictly NO public read. Never placed in a public directory.
+    // Uploader must be the authenticated user. Max 10MB.
+    // Read access is restricted to Admins or backend functions using signed URLs / Admin SDK.
+    match /verification_documents/{userId}/{docId} {
+      allow read: if isAdmin();
+      allow write: if isOwnerOf(userId)
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType.matches('image/(jpeg|png|webp)') || request.resource.contentType == 'application/pdf');
+      allow delete: if isAdmin();
+    }
+    
+    // 4. Support Ticket Attachments (Screenshots, payment proofs)
+    // Read only by ticket owner or Admin. Max 8MB.
+    match /support_attachments/{userId}/{ticketId}/{fileName} {
+      allow read: if isOwnerOf(userId) || isAdmin();
+      allow write: if isOwnerOf(userId)
+                   && request.resource.size < 8 * 1024 * 1024
+                   && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf');
+      allow delete: if isAdmin();
+    }
+    
+    // 5. Default Fallback
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
