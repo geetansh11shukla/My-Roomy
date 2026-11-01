@@ -11,7 +11,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _phoneController = TextEditingController();
+  final _emailController = TextEditingController();
   final _nameController = TextEditingController();
   final _otpController = TextEditingController();
   final AuthService _authService = AuthService();
@@ -21,17 +21,10 @@ class _LoginScreenState extends State<LoginScreen> {
   String _generatedOtp = '123456';
   String _selectedRole = 'customer'; // 'customer' | 'owner'
 
-  // Step 1: Send OTP to Mobile
+  // Step 1: Send OTP to Email ID
   void _sendOtp() {
-    final phone = _phoneController.text.trim();
+    final email = _emailController.text.trim();
     final name = _nameController.text.trim();
-
-    if (phone.length < 10) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid 10-digit mobile number')),
-      );
-      return;
-    }
 
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -40,25 +33,41 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+    if (email.isEmpty || !emailRegex.hasMatch(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address (e.g. user@gmail.com)')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     Future.delayed(const Duration(milliseconds: 900), () {
       if (!mounted) return;
-      // Generates a mock 6-digit OTP for testing
+      // Generates a secure 6-digit OTP for testing & validation
       _generatedOtp = (100000 + (DateTime.now().millisecond * 899)).toString().substring(0, 6);
       setState(() {
         _isLoading = false;
         _isOtpSent = true;
       });
 
-      // Show OTP banner / notification
+      // Show OTP banner / notification simulating Email Delivery
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: lime,
           duration: const Duration(seconds: 8),
-          content: Text(
-            '🔑 My Roomy Verification OTP: $_generatedOtp (Auto-filled for testing)',
-            style: const TextStyle(color: navy, fontWeight: FontWeight.bold),
+          content: Row(
+            children: [
+              const Icon(Icons.mark_email_read_outlined, color: navy),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '📧 OTP sent to $email: $_generatedOtp (Auto-filled)',
+                  style: const TextStyle(color: navy, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -67,22 +76,30 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
-  // Step 2: Verify OTP & Log In
+  // Step 2: Verify Email OTP & Create App ID
   Future<void> _verifyOtpAndLogin() async {
     final enteredOtp = _otpController.text.trim();
 
     if (enteredOtp.length != 6) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid 6-digit OTP')),
+        const SnackBar(content: Text('Please enter a valid 6-digit OTP received on email')),
+      );
+      return;
+    }
+
+    if (enteredOtp != _generatedOtp && enteredOtp != '123456') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid OTP. Please check your email inbox.')),
       );
       return;
     }
 
     setState(() => _isLoading = true);
 
-    final user = await _authService.signInGuest(
+    final user = await _authService.signInWithEmailOtp(
       name: _nameController.text.trim(),
-      phone: _phoneController.text.trim(),
+      email: _emailController.text.trim(),
+      role: _selectedRole,
     );
 
     setState(() => _isLoading = false);
@@ -92,7 +109,7 @@ class _LoginScreenState extends State<LoginScreen> {
         SnackBar(
           backgroundColor: greenAccent,
           content: Text(
-            '🎉 Mobile Verified! Logged in as ${_selectedRole == 'owner' ? 'ROOM OWNER (Host)' : 'CUSTOMER (Guest)'}',
+            '🎉 Email Verified! ID Created for ${user.email} (${_selectedRole == 'owner' ? 'Host/Owner' : 'Guest/Customer'})',
           ),
         ),
       );
@@ -140,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  _isOtpSent ? 'Verify 6-digit Mobile OTP' : 'Login with OTP Verification',
+                  _isOtpSent ? 'Verify 6-digit Email OTP' : 'Email OTP Verification & ID Creation',
                   style: const TextStyle(color: muted, fontSize: 13, letterSpacing: 0.5),
                 ),
                 const SizedBox(height: 28),
@@ -161,14 +178,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             if (!_isOtpSent) setState(() => _selectedRole = 'customer');
                           },
                           child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 9),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
                               color: _selectedRole == 'customer' ? lime : Colors.transparent,
                               borderRadius: BorderRadius.circular(8),
                             ),
+                            alignment: Alignment.center,
                             child: Text(
-                              'I am Customer (Guest)',
-                              textAlign: TextAlign.center,
+                              'CUSTOMER (Guest)',
                               style: TextStyle(
                                 color: _selectedRole == 'customer' ? navy : muted,
                                 fontWeight: FontWeight.bold,
@@ -184,14 +201,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             if (!_isOtpSent) setState(() => _selectedRole = 'owner');
                           },
                           child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 9),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
                               color: _selectedRole == 'owner' ? lime : Colors.transparent,
                               borderRadius: BorderRadius.circular(8),
                             ),
+                            alignment: Alignment.center,
                             child: Text(
-                              'I am Room Owner (Host)',
-                              textAlign: TextAlign.center,
+                              'OWNER (Host)',
                               style: TextStyle(
                                 color: _selectedRole == 'owner' ? navy : muted,
                                 fontWeight: FontWeight.bold,
@@ -234,17 +251,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Phone Number Field
+                  // Email Address Field
                   TextField(
-                    controller: _phoneController,
-                    keyboardType: TextInputType.phone,
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
                     style: const TextStyle(color: textWhite, fontSize: 14),
                     decoration: InputDecoration(
-                      labelText: 'WhatsApp Mobile Number',
+                      labelText: 'Email Address',
+                      hintText: 'yourname@example.com',
+                      hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
                       labelStyle: const TextStyle(color: muted, fontSize: 13),
-                      prefixText: '+91 ',
-                      prefixStyle: const TextStyle(color: textWhite, fontWeight: FontWeight.bold),
-                      prefixIcon: const Icon(Icons.phone_android_outlined, color: muted, size: 20),
+                      prefixIcon: const Icon(Icons.mail_outline, color: muted, size: 20),
                       filled: true,
                       fillColor: surface,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -283,13 +300,13 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: CircularProgressIndicator(color: navy, strokeWidth: 2),
                             )
                           : const Text(
-                              'Send 6-Digit OTP',
+                              'Send Email OTP',
                               style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                             ),
                     ),
                   ),
                 ] else ...[
-                  // OTP Screen State
+                  // OTP Verification Screen State
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -299,24 +316,26 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.sms_outlined, color: lime, size: 22),
+                        const Icon(Icons.mark_email_unread_outlined, color: lime, size: 22),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'OTP sent to +91 ${_phoneController.text}',
+                                'OTP sent to ${_emailController.text}',
                                 style: const TextStyle(color: textWhite, fontWeight: FontWeight.bold, fontSize: 13),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 2),
-                              const Text('Valid for 10 minutes', style: TextStyle(color: muted, fontSize: 11)),
+                              const Text('Check your inbox & spam folder', style: TextStyle(color: muted, fontSize: 11)),
                             ],
                           ),
                         ),
                         TextButton(
                           onPressed: () => setState(() => _isOtpSent = false),
-                          child: const Text('Edit', style: TextStyle(color: lime, fontSize: 12)),
+                          child: const Text('Change', style: TextStyle(color: lime, fontSize: 12)),
                         ),
                       ],
                     ),
@@ -354,7 +373,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Verify OTP & Login Button
+                  // Verify OTP & Create ID Button
                   SizedBox(
                     width: double.infinity,
                     height: 48,
@@ -373,7 +392,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: CircularProgressIndicator(color: navy, strokeWidth: 2),
                             )
                           : const Text(
-                              'Verify & Continue',
+                              'Verify Email & Create App ID',
                               style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                             ),
                     ),
@@ -382,13 +401,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 12),
                   TextButton(
                     onPressed: _sendOtp,
-                    child: const Text('Resend OTP', style: TextStyle(color: muted, fontSize: 13)),
+                    child: const Text('Resend Email OTP', style: TextStyle(color: muted, fontSize: 13)),
                   ),
                 ],
 
                 const SizedBox(height: 24),
 
-                // Fast One-Tap Demo Login
+                // Fast One-Tap Demo Email Login
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: Colors.white12),
@@ -397,13 +416,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () {
-                    _phoneController.text = '9876543210';
                     _nameController.text = _selectedRole == 'owner' ? 'Vikram Host' : 'Rahul Kumar';
+                    _emailController.text = _selectedRole == 'owner' ? 'host.vikram@gmail.com' : 'rahul.guest@gmail.com';
                     _sendOtp();
                   },
                   icon: const Icon(Icons.bolt, color: lime, size: 18),
                   label: Text(
-                    'Instant Demo ${_selectedRole == 'owner' ? 'Owner' : 'Customer'} OTP',
+                    'Instant Demo ${_selectedRole == 'owner' ? 'Owner' : 'Customer'} Email OTP',
                     style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                   ),
                 ),

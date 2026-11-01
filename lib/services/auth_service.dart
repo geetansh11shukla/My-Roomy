@@ -9,18 +9,47 @@ class AuthService {
 
   User? get currentUser => _auth.currentUser;
 
-  /// Sign in anonymously or with phone/credentials
-  Future<UserModel?> signInGuest({required String name, required String phone}) async {
+  /// Sign in anonymously or with email/credentials
+  Future<UserModel?> signInGuest({required String name, required String phone, String email = ''}) async {
     try {
       UserCredential userCredential = await _auth.signInAnonymously();
-      final uid = userCredential.user?.uid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
+      final uid = userCredential.user?.uid ?? 'usr_${DateTime.now().millisecondsSinceEpoch}';
 
       final userModel = UserModel(
         uid: uid,
         name: name,
-        phone: phone,
+        phone: phone.isNotEmpty ? phone : '+91 9876543210',
+        email: email,
         role: 'customer',
         verificationStatus: 'verified',
+        createdAt: DateTime.now(),
+      );
+
+      await _firestore.collection('users').doc(uid).set(userModel.toMap(), SetOptions(merge: true));
+      return userModel;
+    } catch (e) {
+      debugPrint('Auth Error: $e');
+      return null;
+    }
+  }
+
+  /// Sign in with Verified Email OTP
+  Future<UserModel?> signInWithEmailOtp({
+    required String name,
+    required String email,
+    required String role,
+  }) async {
+    try {
+      UserCredential userCredential = await _auth.signInAnonymously();
+      final uid = userCredential.user?.uid ?? 'usr_${DateTime.now().millisecondsSinceEpoch}';
+
+      final userModel = UserModel(
+        uid: uid,
+        fullName: name,
+        email: email,
+        phoneNumber: '+91 9876543210',
+        role: role,
+        identityVerificationStatus: 'verified',
         createdAt: DateTime.now(),
       );
 
