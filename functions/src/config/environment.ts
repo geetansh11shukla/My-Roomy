@@ -10,6 +10,10 @@ export const environment = {
     cloudApiToken: process.env.WHATSAPP_CLOUD_API_TOKEN || '',
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
   },
+  smtp: {
+    user: process.env.SMTP_EMAIL || '',
+    pass: process.env.SMTP_APP_PASSWORD || '',
+  },
   corsOrigin: process.env.CORS_ORIGIN || '*',
 };
 
