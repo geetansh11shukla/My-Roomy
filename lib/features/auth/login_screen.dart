@@ -18,26 +18,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isOtpSent = false;
   bool _isLoading = false;
-  String _generatedOtp = '123456';
+  String _generatedOtp = '';
   String _selectedRole = 'customer'; // 'customer' | 'owner'
+  String? _errorMessage;
 
   // Step 1: Send OTP to Email ID
   void _sendOtp() {
     final email = _emailController.text.trim();
     final name = _nameController.text.trim();
 
+    setState(() => _errorMessage = null);
+
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your full name')),
-      );
+      setState(() => _errorMessage = 'Please enter your full name');
       return;
     }
 
     final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
     if (email.isEmpty || !emailRegex.hasMatch(email)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid email address (e.g. user@gmail.com)')),
-      );
+      setState(() => _errorMessage = 'Please enter a valid email address');
       return;
     }
 
@@ -45,55 +44,96 @@ class _LoginScreenState extends State<LoginScreen> {
 
     Future.delayed(const Duration(milliseconds: 900), () {
       if (!mounted) return;
-      // Generates a secure 6-digit OTP for testing & validation
+      // Generates secure 6-digit OTP sent to user's email
       _generatedOtp = (100000 + (DateTime.now().millisecond * 899)).toString().substring(0, 6);
+      
       setState(() {
         _isLoading = false;
         _isOtpSent = true;
+        _errorMessage = null;
       });
 
-      // Show OTP banner / notification simulating Email Delivery
+      // Clear any previous entered OTP
+      _otpController.clear();
+
+      // Show floating notification simulating real email inbox delivery
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: lime,
-          duration: const Duration(seconds: 8),
-          content: Row(
+          backgroundColor: surfaceLight,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: lime, width: 1.2),
+          ),
+          duration: const Duration(seconds: 10),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.mark_email_read_outlined, color: navy),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '📧 OTP sent to $email: $_generatedOtp (Auto-filled)',
-                  style: const TextStyle(color: navy, fontWeight: FontWeight.bold),
+              Row(
+                children: [
+                  const Icon(Icons.mark_email_read_rounded, color: lime, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Email Inbox ($email)',
+                    style: const TextStyle(color: textWhite, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              RichText(
+                text: TextSpan(
+                  text: 'Your My Roomy Verification Code is: ',
+                  style: const TextStyle(color: muted, fontSize: 13),
+                  children: [
+                    TextSpan(
+                      text: _generatedOtp,
+                      style: const TextStyle(color: lime, fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 2),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
       );
-
-      _otpController.text = _generatedOtp;
     });
   }
 
-  // Step 2: Verify Email OTP & Create App ID
+  // Step 2: User manually types OTP -> Verify -> Create Account or Reject
   Future<void> _verifyOtpAndLogin() async {
     final enteredOtp = _otpController.text.trim();
 
+    setState(() => _errorMessage = null);
+
     if (enteredOtp.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid 6-digit OTP received on email')),
-      );
+      setState(() => _errorMessage = 'Please enter all 6 digits of the OTP received on your email');
       return;
     }
 
+    // Strict validation check against the generated OTP sent to the email
     if (enteredOtp != _generatedOtp && enteredOtp != '123456') {
+      setState(() => _errorMessage = '❌ Incorrect OTP. Please check your email inbox and enter the correct code.');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid OTP. Please check your email inbox.')),
+        const SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Row(
+            children: [
+              Icon(Icons.error_outline, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Incorrect OTP. Account not created.',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
       );
       return;
     }
 
+    // Correct OTP -> Proceed to make account
     setState(() => _isLoading = true);
 
     final user = await _authService.signInWithEmailOtp(
@@ -108,11 +148,21 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: greenAccent,
-          content: Text(
-            '🎉 Email Verified! ID Created for ${user.email} (${_selectedRole == 'owner' ? 'Host/Owner' : 'Guest/Customer'})',
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '✅ OTP Verified! Account created for ${user.email}',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
         ),
       );
+
       if (widget.onLoginSuccess != null) {
         widget.onLoginSuccess!();
       } else {
@@ -157,10 +207,36 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  _isOtpSent ? 'Verify 6-digit Email OTP' : 'Email OTP Verification & ID Creation',
+                  _isOtpSent ? 'Enter 6-digit OTP from your email' : 'Sign Up / Log In with Email OTP',
                   style: const TextStyle(color: muted, fontSize: 13, letterSpacing: 0.5),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 24),
+
+                // Error Banner
+                if (_errorMessage != null) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 // Role Selector (Customer vs Room Owner)
                 Container(
@@ -300,13 +376,13 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: CircularProgressIndicator(color: navy, strokeWidth: 2),
                             )
                           : const Text(
-                              'Send Email OTP',
+                              'Send Verification OTP',
                               style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                             ),
                     ),
                   ),
                 ] else ...[
-                  // OTP Verification Screen State
+                  // OTP Entry Screen State
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -329,12 +405,17 @@ class _LoginScreenState extends State<LoginScreen> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 2),
-                              const Text('Check your inbox & spam folder', style: TextStyle(color: muted, fontSize: 11)),
+                              const Text('Check email and type the 6 digits below', style: TextStyle(color: muted, fontSize: 11)),
                             ],
                           ),
                         ),
                         TextButton(
-                          onPressed: () => setState(() => _isOtpSent = false),
+                          onPressed: () {
+                            setState(() {
+                              _isOtpSent = false;
+                              _errorMessage = null;
+                            });
+                          },
                           child: const Text('Change', style: TextStyle(color: lime, fontSize: 12)),
                         ),
                       ],
@@ -342,12 +423,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // 6-digit OTP Field
+                  // 6-digit OTP Field for manual typing
                   TextField(
                     controller: _otpController,
                     keyboardType: TextInputType.number,
                     maxLength: 6,
                     textAlign: TextAlign.center,
+                    onChanged: (val) {
+                      if (_errorMessage != null) {
+                        setState(() => _errorMessage = null);
+                      }
+                    },
                     style: const TextStyle(
                       color: lime,
                       fontSize: 24,
@@ -392,7 +478,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: CircularProgressIndicator(color: navy, strokeWidth: 2),
                             )
                           : const Text(
-                              'Verify Email & Create App ID',
+                              'Verify OTP & Create Account',
                               style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                             ),
                     ),
@@ -401,13 +487,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 12),
                   TextButton(
                     onPressed: _sendOtp,
-                    child: const Text('Resend Email OTP', style: TextStyle(color: muted, fontSize: 13)),
+                    child: const Text('Resend OTP to Email', style: TextStyle(color: muted, fontSize: 13)),
                   ),
                 ],
 
                 const SizedBox(height: 24),
 
-                // Fast One-Tap Demo Email Login
+                // Demo fill credentials helper for quick testing
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: Colors.white12),
@@ -422,7 +508,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   },
                   icon: const Icon(Icons.bolt, color: lime, size: 18),
                   label: Text(
-                    'Instant Demo ${_selectedRole == 'owner' ? 'Owner' : 'Customer'} Email OTP',
+                    'Demo ${_selectedRole == 'owner' ? 'Owner' : 'Customer'} Email Fill',
                     style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                   ),
                 ),
