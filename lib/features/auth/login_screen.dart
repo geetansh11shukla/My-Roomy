@@ -56,7 +56,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Clear any previous entered OTP
       _otpController.clear();
 
-      // Show floating notification simulating real email inbox delivery
+      // Inform user to check their email inbox
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: surfaceLight,
@@ -64,32 +64,15 @@ class _LoginScreenState extends State<LoginScreen> {
             borderRadius: BorderRadius.circular(12),
             side: const BorderSide(color: lime, width: 1.2),
           ),
-          duration: const Duration(seconds: 10),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          duration: const Duration(seconds: 8),
+          content: Row(
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.mark_email_read_rounded, color: lime, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Email Inbox ($email)',
-                    style: const TextStyle(color: textWhite, fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              RichText(
-                text: TextSpan(
-                  text: 'Your My Roomy Verification Code is: ',
-                  style: const TextStyle(color: muted, fontSize: 13),
-                  children: [
-                    TextSpan(
-                      text: _generatedOtp,
-                      style: const TextStyle(color: lime, fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 2),
-                    ),
-                  ],
+              const Icon(Icons.mark_email_read_rounded, color: lime, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Verification code sent to $email. Please check your Gmail inbox on your phone.',
+                  style: const TextStyle(color: textWhite, fontSize: 13, fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -111,7 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     // Strict validation check against the generated OTP sent to the email
-    if (enteredOtp != _generatedOtp && enteredOtp != '123456') {
+    if (enteredOtp != _generatedOtp) {
       setState(() => _errorMessage = '❌ Incorrect OTP. Please check your email inbox and enter the correct code.');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
