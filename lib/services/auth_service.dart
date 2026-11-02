@@ -9,8 +9,8 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Points to local running backend or fallback
-  static const String _backendBaseUrl = 'http://localhost:8080';
+  // Points to local running backend on clean port 5050
+  static const String _backendBaseUrl = 'http://localhost:5050';
 
   User? get currentUser => _auth.currentUser;
 

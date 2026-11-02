@@ -1,6 +1,6 @@
 import { app } from './app';
 
-const PORT = process.env.PORT || 8080;
+const PORT = 5050;
 app.listen(PORT, () => {
   console.log(`[My Roomy Server] API listening on port ${PORT}`);
 });
