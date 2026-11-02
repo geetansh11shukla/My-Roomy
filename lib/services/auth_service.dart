@@ -57,9 +57,15 @@ class AuthService {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
-        // Authenticate Firebase session
-        UserCredential userCredential = await _auth.signInAnonymously();
-        final uid = userCredential.user?.uid ?? 'usr_${email.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+        String uid = 'usr_${email.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+        try {
+          UserCredential userCredential = await _auth.signInAnonymously();
+          if (userCredential.user?.uid != null) {
+            uid = userCredential.user!.uid;
+          }
+        } catch (authErr) {
+          debugPrint('[AuthService] FirebaseAuth anonymous signin fallback: $authErr');
+        }
 
         final userModel = UserModel(
           uid: uid,
@@ -84,7 +90,7 @@ class AuthService {
       }
     } catch (e) {
       debugPrint('[AuthService] Backend verifyEmailOtp error: $e');
-      return {'success': false, 'error': 'Could not verify code with server. Please try again.'};
+      return {'success': false, 'error': 'Could not verify code with server: $e'};
     }
   }
 
