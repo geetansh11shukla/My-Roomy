@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/services/app_state.dart';
+import '../../main.dart' hide navy, lime, surface, surfaceLight, muted;
+import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
+import '../owner/owner_dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback? onLoginSuccess;
@@ -106,29 +110,77 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (res['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: greenAccent,
-          content: Row(
+      // 1. Update global AppState with created/verified account
+      final user = res['user'] as UserModel?;
+      if (user != null) {
+        final role = _selectedRole == 'owner' ? UserRole.owner : UserRole.customer;
+        AppState.instance.login(user: user, role: role);
+      }
+
+      // 2. Show big success confirmation dialog
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: lime, width: 1.5)),
+          title: Row(
+            children: const [
+              Icon(Icons.check_circle_rounded, color: lime, size: 28),
+              SizedBox(width: 10),
+              Text('Account Created!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.check_circle_rounded, color: Colors.white),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '✅ OTP Verified! Account created for ${_emailController.text.trim()}',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              Text('Welcome, ${_nameController.text.trim()}!', style: const TextStyle(color: lime, fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(
+                'Your email (${_emailController.text.trim()}) was successfully verified via OTP.',
+                style: const TextStyle(color: muted, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: navy, borderRadius: BorderRadius.circular(10)),
+                child: Row(
+                  children: [
+                    const Icon(Icons.badge_outlined, color: lime, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Account Type: ${_selectedRole.toUpperCase()}',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: lime,
+                foregroundColor: navy,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                // Navigate into the main app experience
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _selectedRole == 'owner' ? OwnerDashboardScreen() : const HomeScreen(),
+                  ),
+                  (route) => false,
+                );
+              },
+              child: const Text('Continue to App ➔', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
       );
-
-      if (widget.onLoginSuccess != null) {
-        widget.onLoginSuccess!();
-      } else {
-        Navigator.pop(context);
-      }
     } else {
       // Server returned incorrect OTP
       final err = res['error'] ?? '❌ Incorrect OTP. Please check your email inbox and enter the correct code.';

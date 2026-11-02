@@ -21,6 +21,22 @@ app.use(cors({ origin: true }));
 app.use(express.json());
 app.use(responseFormatter);
 
+app.get('/', (req, res) => {
+  res.json({
+    name: 'My Roomy Backend API',
+    status: 'online',
+    version: '2.0.0',
+    endpoints: {
+      health: '/health',
+      sendOtp: 'POST /auth/send-otp',
+      verifyOtp: 'POST /auth/verify-otp',
+      me: 'GET /auth/me',
+      rooms: '/rooms',
+      bookings: '/bookings',
+    },
+  });
+});
+
 app.get('/health', (req, res) => {
   res.apiSuccess({
     status: 'online',
