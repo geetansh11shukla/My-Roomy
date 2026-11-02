@@ -1,63 +1,90 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import '../models/user_model.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  // Points to local running backend or fallback
+  static const String _backendBaseUrl = 'http://localhost:8080';
+
   User? get currentUser => _auth.currentUser;
 
-  /// Sign in anonymously or with email/credentials
-  Future<UserModel?> signInGuest({required String name, required String phone, String email = ''}) async {
+  /// 1. Send Real OTP to user's Email via Gmail SMTP
+  Future<Map<String, dynamic>> requestEmailOtp({required String email, required String name}) async {
     try {
-      UserCredential userCredential = await _auth.signInAnonymously();
-      final uid = userCredential.user?.uid ?? 'usr_${DateTime.now().millisecondsSinceEpoch}';
+      final response = await http.post(
+        Uri.parse('$_backendBaseUrl/auth/send-otp'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email, 'name': name}),
+      ).timeout(const Duration(seconds: 15));
 
-      final userModel = UserModel(
-        uid: uid,
-        name: name,
-        phone: phone.isNotEmpty ? phone : '+91 9876543210',
-        email: email,
-        role: 'customer',
-        verificationStatus: 'verified',
-        createdAt: DateTime.now(),
-      );
-
-      await _firestore.collection('users').doc(uid).set(userModel.toMap(), SetOptions(merge: true));
-      return userModel;
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {'success': true, 'message': data['message'] ?? 'OTP sent to your email'};
+      } else {
+        return {'success': false, 'error': data['error'] ?? 'Could not send verification code.'};
+      }
     } catch (e) {
-      debugPrint('Auth Error: $e');
-      return null;
+      debugPrint('[AuthService] Backend requestEmailOtp error: $e');
+      return {'success': false, 'error': 'Could not connect to authentication server. Check connection.'};
     }
   }
 
-  /// Sign in with Verified Email OTP
-  Future<UserModel?> signInWithEmailOtp({
-    required String name,
+  /// 2. Verify OTP with Server & Activate App Account
+  Future<Map<String, dynamic>> verifyEmailOtp({
     required String email,
+    required String otp,
+    required String name,
     required String role,
   }) async {
     try {
-      UserCredential userCredential = await _auth.signInAnonymously();
-      final uid = userCredential.user?.uid ?? 'usr_${DateTime.now().millisecondsSinceEpoch}';
+      final response = await http.post(
+        Uri.parse('$_backendBaseUrl/auth/verify-otp'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'otp': otp,
+          'name': name,
+          'role': role,
+        }),
+      ).timeout(const Duration(seconds: 15));
 
-      final userModel = UserModel(
-        uid: uid,
-        fullName: name,
-        email: email,
-        phoneNumber: '+91 9876543210',
-        role: role,
-        identityVerificationStatus: 'verified',
-        createdAt: DateTime.now(),
-      );
+      final data = jsonDecode(response.body);
 
-      await _firestore.collection('users').doc(uid).set(userModel.toMap(), SetOptions(merge: true));
-      return userModel;
+      if (response.statusCode == 200 && data['success'] == true) {
+        // Authenticate Firebase session
+        UserCredential userCredential = await _auth.signInAnonymously();
+        final uid = userCredential.user?.uid ?? 'usr_${email.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+
+        final userModel = UserModel(
+          uid: uid,
+          fullName: name,
+          email: email,
+          phoneNumber: '+91 9876543210',
+          role: role,
+          identityVerificationStatus: 'verified',
+          createdAt: DateTime.now(),
+        );
+
+        try {
+          await _firestore.collection('users').doc(uid).set(userModel.toMap(), SetOptions(merge: true));
+        } catch (_) {}
+
+        return {'success': true, 'user': userModel};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Incorrect OTP. Please check your email inbox and enter the 6-digit code.',
+        };
+      }
     } catch (e) {
-      debugPrint('Auth Error: $e');
-      return null;
+      debugPrint('[AuthService] Backend verifyEmailOtp error: $e');
+      return {'success': false, 'error': 'Could not verify code with server. Please try again.'};
     }
   }
 

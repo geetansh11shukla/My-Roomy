@@ -18,12 +18,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isOtpSent = false;
   bool _isLoading = false;
-  String _generatedOtp = '';
   String _selectedRole = 'customer'; // 'customer' | 'owner'
   String? _errorMessage;
 
-  // Step 1: Send OTP to Email ID
-  void _sendOtp() {
+  // Step 1: Send Real OTP to Email via Backend Gmail SMTP
+  Future<void> _sendOtp() async {
     final email = _emailController.text.trim();
     final name = _nameController.text.trim();
 
@@ -42,21 +41,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
 
-    Future.delayed(const Duration(milliseconds: 900), () {
-      if (!mounted) return;
-      // Generates secure 6-digit OTP sent to user's email
-      _generatedOtp = (100000 + (DateTime.now().millisecond * 899)).toString().substring(0, 6);
-      
+    final res = await _authService.requestEmailOtp(email: email, name: name);
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (res['success'] == true) {
       setState(() {
-        _isLoading = false;
         _isOtpSent = true;
         _errorMessage = null;
       });
-
-      // Clear any previous entered OTP
       _otpController.clear();
 
-      // Inform user to check their email inbox
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: surfaceLight,
@@ -71,7 +67,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Verification code sent to $email. Please check your Gmail inbox on your phone.',
+                  'Verification code sent to $email. Please check your Gmail app.',
                   style: const TextStyle(color: textWhite, fontSize: 13, fontWeight: FontWeight.w600),
                 ),
               ),
@@ -79,10 +75,14 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       );
-    });
+    } else {
+      setState(() {
+        _errorMessage = res['error'] ?? 'Could not send verification email.';
+      });
+    }
   }
 
-  // Step 2: User manually types OTP -> Verify -> Create Account or Reject
+  // Step 2: User manually types OTP -> Backend Verifies OTP -> Create Account or Reject
   Future<void> _verifyOtpAndLogin() async {
     final enteredOtp = _otpController.text.trim();
 
@@ -93,41 +93,19 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    // Strict validation check against the generated OTP sent to the email
-    if (enteredOtp != _generatedOtp) {
-      setState(() => _errorMessage = '❌ Incorrect OTP. Please check your email inbox and enter the correct code.');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Colors.redAccent,
-          content: Row(
-            children: [
-              Icon(Icons.error_outline, color: Colors.white),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Incorrect OTP. Account not created.',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-      return;
-    }
-
-    // Correct OTP -> Proceed to make account
     setState(() => _isLoading = true);
 
-    final user = await _authService.signInWithEmailOtp(
-      name: _nameController.text.trim(),
+    final res = await _authService.verifyEmailOtp(
       email: _emailController.text.trim(),
+      otp: enteredOtp,
+      name: _nameController.text.trim(),
       role: _selectedRole,
     );
 
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
-    if (user != null && mounted) {
+    if (res['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: greenAccent,
@@ -137,7 +115,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '✅ OTP Verified! Account created for ${user.email}',
+                  '✅ OTP Verified! Account created for ${_emailController.text.trim()}',
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -151,6 +129,28 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         Navigator.pop(context);
       }
+    } else {
+      // Server returned incorrect OTP
+      final err = res['error'] ?? '❌ Incorrect OTP. Please check your email inbox and enter the correct code.';
+      setState(() => _errorMessage = err);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  err,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
     }
   }
 
@@ -486,12 +486,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   onPressed: () {
                     _nameController.text = _selectedRole == 'owner' ? 'Vikram Host' : 'Rahul Kumar';
-                    _emailController.text = _selectedRole == 'owner' ? 'host.vikram@gmail.com' : 'rahul.guest@gmail.com';
+                    _emailController.text = 'geetanshshukla11@gmail.com';
                     _sendOtp();
                   },
                   icon: const Icon(Icons.bolt, color: lime, size: 18),
                   label: Text(
-                    'Demo ${_selectedRole == 'owner' ? 'Owner' : 'Customer'} Email Fill',
+                    'Quick Fill My Email (${_selectedRole == 'owner' ? 'Host' : 'Guest'})',
                     style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                   ),
                 ),
