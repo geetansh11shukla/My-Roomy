@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_theme.dart';
-import '../../core/services/app_state.dart';
-import '../../main.dart' hide navy, lime, surface, surfaceLight, muted;
-import '../../models/user_model.dart';
-import '../../services/auth_service.dart';
-import '../owner/owner_dashboard_screen.dart';
+import 'package:room_wala/core/theme/app_theme.dart';
+import 'package:room_wala/core/services/app_state.dart';
+import 'package:room_wala/main.dart' hide navy, lime, surface, surfaceLight, muted;
+import 'package:room_wala/models/user_model.dart';
+import 'package:room_wala/services/auth_service.dart';
+import 'package:room_wala/features/owner/owner_dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback? onLoginSuccess;
