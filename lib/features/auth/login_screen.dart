@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'package:room_wala/core/theme/app_theme.dart';
 import 'package:room_wala/core/services/app_state.dart';
 import 'package:room_wala/main.dart' hide navy, lime, surface, surfaceLight, muted;
@@ -17,18 +18,74 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _nameController = TextEditingController();
+  final _passwordController = TextEditingController();
   final _otpController = TextEditingController();
   final AuthService _authService = AuthService();
 
+  bool _isSignUpMode = false; // false = Login with Password, true = Register (OTP + Password)
   bool _isOtpSent = false;
   bool _isLoading = false;
+  bool _obscurePassword = true;
   String _selectedRole = 'customer'; // 'customer' | 'owner'
   String? _errorMessage;
 
-  // Step 1: Send Real OTP to Email via Backend Gmail SMTP
+  // Login using Email and Password
+  Future<void> _loginWithPassword() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    setState(() => _errorMessage = null);
+
+    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+    if (email.isEmpty || !emailRegex.hasMatch(email)) {
+      setState(() => _errorMessage = 'Please enter a valid email address');
+      return;
+    }
+
+    if (password.isEmpty) {
+      setState(() => _errorMessage = 'Please enter your password');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    final res = await _authService.loginWithPassword(
+      email: email,
+      password: password,
+    );
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (res['success'] == true) {
+      final user = res['user'] as UserModel?;
+      if (user != null) {
+        final role = user.role == 'owner' ? UserRole.owner : UserRole.customer;
+        AppState.instance.login(user: user, role: role);
+      }
+
+      // Navigate to destination
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _selectedRole == 'owner'
+              ? const OwnerDashboardScreen()
+              : const HomeScreen(),
+        ),
+        (route) => false,
+      );
+    } else {
+      setState(() {
+        _errorMessage = res['error'] ?? 'Login failed. Please check your details.';
+      });
+    }
+  }
+
+  // Step 1 of Sign Up: Send Real OTP to Email via Backend Gmail SMTP
   Future<void> _sendOtp() async {
     final email = _emailController.text.trim();
     final name = _nameController.text.trim();
+    final password = _passwordController.text;
 
     setState(() => _errorMessage = null);
 
@@ -43,9 +100,18 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (password.length < 6) {
+      setState(() => _errorMessage = 'Password must be at least 6 characters');
+      return;
+    }
+
     setState(() => _isLoading = true);
 
-    final res = await _authService.requestEmailOtp(email: email, name: name);
+    final res = await _authService.requestEmailOtp(
+      email: email,
+      name: name,
+      password: password,
+    );
 
     if (!mounted) return;
     setState(() => _isLoading = false);
@@ -72,7 +138,11 @@ class _LoginScreenState extends State<LoginScreen> {
               Expanded(
                 child: Text(
                   'Verification code sent to $email. Please check your Gmail app.',
-                  style: const TextStyle(color: textWhite, fontSize: 13, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    color: textWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -86,14 +156,17 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // Step 2: User manually types OTP -> Backend Verifies OTP -> Create Account or Reject
+  // Step 2 of Sign Up: Verify OTP -> Save Account & Password
   Future<void> _verifyOtpAndLogin() async {
     final enteredOtp = _otpController.text.trim();
 
     setState(() => _errorMessage = null);
 
     if (enteredOtp.length != 6) {
-      setState(() => _errorMessage = 'Please enter all 6 digits of the OTP received on your email');
+      setState(
+        () => _errorMessage =
+            'Please enter all 6 digits of the OTP received on your email',
+      );
       return;
     }
 
@@ -104,6 +177,7 @@ class _LoginScreenState extends State<LoginScreen> {
       otp: enteredOtp,
       name: _nameController.text.trim(),
       role: _selectedRole,
+      password: _passwordController.text,
     );
 
     if (!mounted) return;
@@ -113,7 +187,9 @@ class _LoginScreenState extends State<LoginScreen> {
       // 1. Update global AppState with created/verified account
       final user = res['user'] as UserModel?;
       if (user != null) {
-        final role = _selectedRole == 'owner' ? UserRole.owner : UserRole.customer;
+        final role = _selectedRole == 'owner'
+            ? UserRole.owner
+            : UserRole.customer;
         AppState.instance.login(user: user, role: role);
       }
 
@@ -123,19 +199,36 @@ class _LoginScreenState extends State<LoginScreen> {
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           backgroundColor: surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: lime, width: 1.5)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: lime, width: 1.5),
+          ),
           title: Row(
             children: const [
               Icon(Icons.check_circle_rounded, color: lime, size: 28),
               SizedBox(width: 10),
-              Text('Account Created!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              Text(
+                'Account Created!',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
             ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Welcome, ${_nameController.text.trim()}!', style: const TextStyle(color: lime, fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(
+                'Welcome, ${_nameController.text.trim()}!',
+                style: const TextStyle(
+                  color: lime,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
                 'Your email (${_emailController.text.trim()}) was successfully verified via OTP.',
@@ -144,14 +237,21 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: navy, borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(
+                  color: navy,
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Row(
                   children: [
                     const Icon(Icons.badge_outlined, color: lime, size: 20),
                     const SizedBox(width: 8),
                     Text(
                       'Account Type: ${_selectedRole.toUpperCase()}',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -163,7 +263,9 @@ class _LoginScreenState extends State<LoginScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: lime,
                 foregroundColor: navy,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               onPressed: () {
                 Navigator.of(ctx).pop();
@@ -171,19 +273,26 @@ class _LoginScreenState extends State<LoginScreen> {
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => _selectedRole == 'owner' ? OwnerDashboardScreen() : const HomeScreen(),
+                    builder: (_) => _selectedRole == 'owner'
+                        ? const OwnerDashboardScreen()
+                        : const HomeScreen(),
                   ),
                   (route) => false,
                 );
               },
-              child: const Text('Continue to App ➔', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text(
+                'Continue to App ➔',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),
       );
     } else {
       // Server returned incorrect OTP
-      final err = res['error'] ?? '❌ Incorrect OTP. Please check your email inbox and enter the correct code.';
+      final err =
+          res['error'] ??
+          '❌ Incorrect OTP. Please check your email inbox and enter the correct code.';
       setState(() => _errorMessage = err);
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -196,7 +305,10 @@ class _LoginScreenState extends State<LoginScreen> {
               Expanded(
                 child: Text(
                   err,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -227,9 +339,9 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 // Clean My Roomy Logo Branding
                 ShaderMask(
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [lime, Color(0xFF38BDF8)],
-                  ).createShader(bounds),
+                  shaderCallback: (bounds) =>
+                      const LinearGradient(colors: [lime, Color(0xFF38BDF8)])
+                          .createShader(bounds),
                   child: const Text(
                     'My Roomy',
                     style: TextStyle(
@@ -242,30 +354,120 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  _isOtpSent ? 'Enter 6-digit OTP from your email' : 'Sign Up / Log In with Email OTP',
-                  style: const TextStyle(color: muted, fontSize: 13, letterSpacing: 0.5),
+                  _isOtpSent
+                      ? 'Enter 6-digit OTP from your email'
+                      : (_isSignUpMode
+                          ? 'Create Account with Password & Email OTP'
+                          : 'Sign In to Your Account with Password'),
+                  style: const TextStyle(
+                    color: muted,
+                    fontSize: 13,
+                    letterSpacing: 0.5,
+                  ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
+
+                // Tab Switcher: Login vs Sign Up
+                if (!_isOtpSent) ...[
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _isSignUpMode = false;
+                                _errorMessage = null;
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: !_isSignUpMode ? lime : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Log In',
+                                style: TextStyle(
+                                  color: !_isSignUpMode ? navy : muted,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _isSignUpMode = true;
+                                _errorMessage = null;
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: _isSignUpMode ? lime : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Create New ID',
+                                style: TextStyle(
+                                  color: _isSignUpMode ? navy : muted,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
 
                 // Error Banner
                 if (_errorMessage != null) ...[
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
                       color: Colors.redAccent.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
+                      border: Border.all(
+                        color: Colors.redAccent.withValues(alpha: 0.5),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+                        const Icon(
+                          Icons.error_outline,
+                          color: Colors.redAccent,
+                          size: 18,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             _errorMessage!,
-                            style: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600),
+                            style: const TextStyle(
+                              color: Colors.redAccent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -286,19 +488,24 @@ class _LoginScreenState extends State<LoginScreen> {
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
-                            if (!_isOtpSent) setState(() => _selectedRole = 'customer');
+                            if (!_isOtpSent)
+                              setState(() => _selectedRole = 'customer');
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
-                              color: _selectedRole == 'customer' ? lime : Colors.transparent,
+                              color: _selectedRole == 'customer'
+                                  ? lime
+                                  : Colors.transparent,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             alignment: Alignment.center,
                             child: Text(
                               'CUSTOMER (Guest)',
                               style: TextStyle(
-                                color: _selectedRole == 'customer' ? navy : muted,
+                                color: _selectedRole == 'customer'
+                                    ? navy
+                                    : muted,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 12,
                               ),
@@ -309,12 +516,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
-                            if (!_isOtpSent) setState(() => _selectedRole = 'owner');
+                            if (!_isOtpSent)
+                              setState(() => _selectedRole = 'owner');
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
-                              color: _selectedRole == 'owner' ? lime : Colors.transparent,
+                              color: _selectedRole == 'owner'
+                                  ? lime
+                                  : Colors.transparent,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             alignment: Alignment.center,
@@ -335,17 +545,66 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 24),
 
                 if (!_isOtpSent) ...[
-                  // Name Field
+                  // Name Field (Only in Sign Up mode)
+                  if (_isSignUpMode) ...[
+                    TextField(
+                      controller: _nameController,
+                      style: const TextStyle(color: textWhite, fontSize: 14),
+                      decoration: InputDecoration(
+                        labelText: 'Full Name',
+                        labelStyle: const TextStyle(color: muted, fontSize: 13),
+                        prefixIcon: const Icon(
+                          Icons.person_outline,
+                          color: muted,
+                          size: 20,
+                        ),
+                        filled: true,
+                        fillColor: surface,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: Colors.white10),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: Colors.white12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: lime),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+
+                  // Email Address Field
                   TextField(
-                    controller: _nameController,
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
                     style: const TextStyle(color: textWhite, fontSize: 14),
                     decoration: InputDecoration(
-                      labelText: 'Full Name',
+                      labelText: 'Email Address',
+                      hintText: 'yourname@example.com',
+                      hintStyle: const TextStyle(
+                        color: Colors.white24,
+                        fontSize: 13,
+                      ),
                       labelStyle: const TextStyle(color: muted, fontSize: 13),
-                      prefixIcon: const Icon(Icons.person_outline, color: muted, size: 20),
+                      prefixIcon: const Icon(
+                        Icons.mail_outline,
+                        color: muted,
+                        size: 20,
+                      ),
                       filled: true,
                       fillColor: surface,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: const BorderSide(color: Colors.white10),
@@ -362,20 +621,40 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Email Address Field
+                  // Password Field
                   TextField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
+                    controller: _passwordController,
+                    obscureText: _obscurePassword,
                     style: const TextStyle(color: textWhite, fontSize: 14),
                     decoration: InputDecoration(
-                      labelText: 'Email Address',
-                      hintText: 'yourname@example.com',
-                      hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
+                      labelText: _isSignUpMode ? 'Set New Password' : 'Password',
+                      hintText: _isSignUpMode ? 'Min 6 characters' : 'Enter your password',
+                      hintStyle: const TextStyle(
+                        color: Colors.white24,
+                        fontSize: 13,
+                      ),
                       labelStyle: const TextStyle(color: muted, fontSize: 13),
-                      prefixIcon: const Icon(Icons.mail_outline, color: muted, size: 20),
+                      prefixIcon: const Icon(
+                        Icons.lock_outline,
+                        color: muted,
+                        size: 20,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                          color: muted,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          setState(() => _obscurePassword = !_obscurePassword);
+                        },
+                      ),
                       filled: true,
                       fillColor: surface,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: const BorderSide(color: Colors.white10),
@@ -392,7 +671,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Send OTP Button
+                  // Submit Button (Login with Password OR Send OTP to Create ID)
                   SizedBox(
                     width: double.infinity,
                     height: 48,
@@ -400,19 +679,31 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: lime,
                         foregroundColor: navy,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                         elevation: 0,
                       ),
-                      onPressed: _isLoading ? null : _sendOtp,
+                      onPressed: _isLoading
+                          ? null
+                          : (_isSignUpMode ? _sendOtp : _loginWithPassword),
                       child: _isLoading
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(color: navy, strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                color: navy,
+                                strokeWidth: 2,
+                              ),
                             )
-                          : const Text(
-                              'Send Verification OTP',
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                          : Text(
+                              _isSignUpMode
+                                  ? 'Verify Email & Create Account'
+                                  : 'Log In with Password',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                     ),
                   ),
@@ -427,7 +718,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.mark_email_unread_outlined, color: lime, size: 22),
+                        const Icon(
+                          Icons.mark_email_unread_outlined,
+                          color: lime,
+                          size: 22,
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
@@ -435,12 +730,19 @@ class _LoginScreenState extends State<LoginScreen> {
                             children: [
                               Text(
                                 'OTP sent to ${_emailController.text}',
-                                style: const TextStyle(color: textWhite, fontWeight: FontWeight.bold, fontSize: 13),
+                                style: const TextStyle(
+                                  color: textWhite,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 2),
-                              const Text('Check email and type the 6 digits below', style: TextStyle(color: muted, fontSize: 11)),
+                              const Text(
+                                'Check email and type the 6 digits below',
+                                style: TextStyle(color: muted, fontSize: 11),
+                              ),
                             ],
                           ),
                         ),
@@ -451,7 +753,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               _errorMessage = null;
                             });
                           },
-                          child: const Text('Change', style: TextStyle(color: lime, fontSize: 12)),
+                          child: const Text(
+                            'Change',
+                            style: TextStyle(color: lime, fontSize: 12),
+                          ),
                         ),
                       ],
                     ),
@@ -477,11 +782,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     decoration: InputDecoration(
                       hintText: '• • • • • •',
-                      hintStyle: const TextStyle(color: muted, letterSpacing: 8),
+                      hintStyle: const TextStyle(
+                        color: muted,
+                        letterSpacing: 8,
+                      ),
                       counterText: '',
                       filled: true,
                       fillColor: surface,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: const BorderSide(color: Colors.white10),
@@ -502,7 +813,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: lime,
                         foregroundColor: navy,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                         elevation: 0,
                       ),
                       onPressed: _isLoading ? null : _verifyOtpAndLogin,
@@ -510,11 +823,17 @@ class _LoginScreenState extends State<LoginScreen> {
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(color: navy, strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                color: navy,
+                                strokeWidth: 2,
+                              ),
                             )
                           : const Text(
                               'Verify OTP & Create Account',
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                     ),
                   ),
@@ -522,7 +841,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 12),
                   TextButton(
                     onPressed: _sendOtp,
-                    child: const Text('Resend OTP to Email', style: TextStyle(color: muted, fontSize: 13)),
+                    child: const Text(
+                      'Resend OTP to Email',
+                      style: TextStyle(color: muted, fontSize: 13),
+                    ),
                   ),
                 ],
 
@@ -534,17 +856,24 @@ class _LoginScreenState extends State<LoginScreen> {
                     side: const BorderSide(color: Colors.white12),
                     foregroundColor: textWhite,
                     minimumSize: const Size.fromHeight(44),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                   onPressed: () {
-                    _nameController.text = _selectedRole == 'owner' ? 'Vikram Host' : 'Rahul Kumar';
+                    _nameController.text = _selectedRole == 'owner'
+                        ? 'Vikram Host'
+                        : 'Rahul Kumar';
                     _emailController.text = 'geetanshshukla11@gmail.com';
                     _sendOtp();
                   },
                   icon: const Icon(Icons.bolt, color: lime, size: 18),
                   label: Text(
                     'Quick Fill My Email (${_selectedRole == 'owner' ? 'Host' : 'Guest'})',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],

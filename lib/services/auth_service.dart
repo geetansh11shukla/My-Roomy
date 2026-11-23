@@ -15,12 +15,20 @@ class AuthService {
   User? get currentUser => _auth.currentUser;
 
   /// 1. Send Real OTP to user's Email via Gmail SMTP
-  Future<Map<String, dynamic>> requestEmailOtp({required String email, required String name}) async {
+  Future<Map<String, dynamic>> requestEmailOtp({
+    required String email,
+    required String name,
+    String? password,
+  }) async {
     try {
       final response = await http.post(
         Uri.parse('$_backendBaseUrl/auth/send-otp'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'name': name}),
+        body: jsonEncode({
+          'email': email,
+          'name': name,
+          if (password != null) 'password': password,
+        }),
       ).timeout(const Duration(seconds: 15));
 
       final data = jsonDecode(response.body);
@@ -35,12 +43,13 @@ class AuthService {
     }
   }
 
-  /// 2. Verify OTP with Server & Activate App Account
+  /// 2. Verify OTP with Server & Activate App Account with Password
   Future<Map<String, dynamic>> verifyEmailOtp({
     required String email,
     required String otp,
     required String name,
     required String role,
+    String? password,
   }) async {
     try {
       final response = await http.post(
@@ -51,6 +60,7 @@ class AuthService {
           'otp': otp,
           'name': name,
           'role': role,
+          if (password != null) 'password': password,
         }),
       ).timeout(const Duration(seconds: 15));
 
@@ -59,7 +69,9 @@ class AuthService {
       if (response.statusCode == 200 && data['success'] == true) {
         String uid = 'usr_${email.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
         try {
-          UserCredential userCredential = await _auth.signInAnonymously();
+          UserCredential userCredential = await _auth
+              .signInAnonymously()
+              .timeout(const Duration(seconds: 4));
           if (userCredential.user?.uid != null) {
             uid = userCredential.user!.uid;
           }
@@ -78,8 +90,14 @@ class AuthService {
         );
 
         try {
-          await _firestore.collection('users').doc(uid).set(userModel.toMap(), SetOptions(merge: true));
-        } catch (_) {}
+          await _firestore
+              .collection('users')
+              .doc(uid)
+              .set(userModel.toMap(), SetOptions(merge: true))
+              .timeout(const Duration(seconds: 4));
+        } catch (dbErr) {
+          debugPrint('[AuthService] Firestore sync fallback: $dbErr');
+        }
 
         return {'success': true, 'user': userModel};
       } else {
@@ -91,6 +109,52 @@ class AuthService {
     } catch (e) {
       debugPrint('[AuthService] Backend verifyEmailOtp error: $e');
       return {'success': false, 'error': 'Could not verify code with server: $e'};
+    }
+  }
+
+  /// 3. Login with Email and Password
+  Future<Map<String, dynamic>> loginWithPassword({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_backendBaseUrl/auth/login-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+        }),
+      ).timeout(const Duration(seconds: 15));
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        final userData = data['user'] as Map<String, dynamic>? ?? {};
+        final uid = userData['uid'] ?? 'usr_${email.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+        final name = userData['fullName'] ?? 'User';
+        final role = userData['role'] ?? 'customer';
+
+        final userModel = UserModel(
+          uid: uid,
+          fullName: name,
+          email: email,
+          phoneNumber: '+91 9876543210',
+          role: role,
+          identityVerificationStatus: 'verified',
+          createdAt: DateTime.now(),
+        );
+
+        return {'success': true, 'user': userModel};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Login failed. Please check your credentials.',
+        };
+      }
+    } catch (e) {
+      debugPrint('[AuthService] Backend loginWithPassword error: $e');
+      return {'success': false, 'error': 'Could not connect to authentication server.'};
     }
   }
 

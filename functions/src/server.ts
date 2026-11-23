@@ -1,6 +1,8 @@
 import { app } from './app';
 
 const PORT = 5050;
-app.listen(PORT, () => {
-  console.log(`[My Roomy Server] API listening on port ${PORT}`);
+const HOST = '0.0.0.0';
+
+app.listen(PORT, HOST, () => {
+  console.log(`[My Roomy Server] API listening on http://${HOST}:${PORT}`);
 });

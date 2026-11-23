@@ -9,14 +9,25 @@ interface OtpRecord {
   otp: string;
   expiresAt: number;
   name: string;
+  password?: string;
 }
 const otpStore = new Map<string, OtpRecord>();
+
+// User credentials store with passwords
+interface StoredUser {
+  uid: string;
+  email: string;
+  name: string;
+  passwordHash: string; // Plain/hashed comparison
+  role: string;
+}
+const userStore = new Map<string, StoredUser>();
 
 /**
  * 1. Request OTP to be sent to recipient email
  */
 authRouter.post('/send-otp', async (req, res) => {
-  const { email, name } = req.body;
+  const { email, name, password } = req.body;
   if (!email || !email.includes('@')) {
     return res.status(400).json({ success: false, error: 'Valid email address is required' });
   }
@@ -29,6 +40,7 @@ authRouter.post('/send-otp', async (req, res) => {
     otp,
     expiresAt,
     name: name || 'User',
+    password: password || undefined,
   });
 
   const dispatch = await EmailOtpService.sendOtpEmail(email.trim(), otp, name || 'User');
@@ -41,10 +53,10 @@ authRouter.post('/send-otp', async (req, res) => {
 });
 
 /**
- * 2. Verify OTP sent to email and issue user session/account
+ * 2. Verify OTP sent to email and issue user session/account with password
  */
 authRouter.post('/verify-otp', (req, res) => {
-  const { email, otp, role, name } = req.body;
+  const { email, otp, role, name, password } = req.body;
   if (!email || !otp) {
     return res.status(400).json({ success: false, error: 'Email and OTP are required' });
   }
@@ -65,7 +77,18 @@ authRouter.post('/verify-otp', (req, res) => {
   // OTP verified successfully -> Remove used OTP
   otpStore.delete(cleanEmail);
 
+  const finalPassword = password || record?.password || 'password123';
   const uid = `usr_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+  // Save/register user account with password
+  userStore.set(cleanEmail, {
+    uid,
+    email: cleanEmail,
+    name: name || record?.name || 'Verified User',
+    passwordHash: finalPassword,
+    role: role || 'customer',
+  });
+
   return res.json({
     success: true,
     token: `jwt_${uid}_verified`,
@@ -74,6 +97,45 @@ authRouter.post('/verify-otp', (req, res) => {
       fullName: name || record?.name || 'Verified User',
       email: cleanEmail,
       role: role || 'customer',
+      identityVerificationStatus: 'verified',
+    },
+  });
+});
+
+/**
+ * 3. Login with Email and Password
+ */
+authRouter.post('/login-password', (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: 'Email and password are required' });
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+  const user = userStore.get(cleanEmail);
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      error: 'No account found with this email. Please create an account first.',
+    });
+  }
+
+  if (user.passwordHash !== password) {
+    return res.status(401).json({
+      success: false,
+      error: 'Wrong password. Please enter the correct password or try again.',
+    });
+  }
+
+  return res.json({
+    success: true,
+    token: `jwt_${user.uid}_verified`,
+    user: {
+      uid: user.uid,
+      fullName: user.name,
+      email: user.email,
+      role: user.role,
       identityVerificationStatus: 'verified',
     },
   });
